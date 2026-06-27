@@ -1,0 +1,7 @@
+print("=" * 50)
+print("        ATHENA CORE INITIALIZED")
+print("=" * 50)
+print("Founder : Humau")
+print("Version : 0.1.0")
+print("Status  : Development Started")
+print("=" * 50)
