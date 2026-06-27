@@ -1,7 +1,17 @@
-print("=" * 50)
-print("        ATHENA CORE INITIALIZED")
-print("=" * 50)
-print("Founder : Humau")
-print("Version : 0.1.0")
-print("Status  : Development Started")
-print("=" * 50)
+from core.banner import show_banner
+from core.startup import startup
+from core.logger import log
+
+from exchange.manager import ExchangeManager
+
+show_banner()
+
+startup()
+
+manager = ExchangeManager()
+
+exchange = manager.get_exchange()
+
+exchange.connect()
+
+log("ATHENA Core Initialized Successfully")
