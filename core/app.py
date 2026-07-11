@@ -1,7 +1,9 @@
 from exchange.manager import ExchangeManager
 from exchange.market_data import MarketData
 from exchange.parser import BitgetParser
+
 from scanner.market_scanner import MarketScanner
+from scanner.eligibility_filter import MarketEligibilityFilter
 from scanner.ranking_engine import RankingEngine
 
 from core.logger import log
@@ -14,6 +16,7 @@ class Athena:
         self.exchange = ExchangeManager().get_exchange()
         self.market = MarketData()
         self.scanner = MarketScanner()
+        self.eligibility_filter = MarketEligibilityFilter()
         self.ranking_engine = RankingEngine()
 
     def run(self):
@@ -25,24 +28,28 @@ class Athena:
         # Fetch complete market snapshot
         response = self.market.get_all_tickers()
 
-        # Parse valid ticker records
+        # Parse market records
         tickers = BitgetParser.parse_tickers(response)
 
-        # Update market cache
+        # Update complete market cache
         for ticker in tickers:
             self.scanner.update(ticker)
 
-        # Rank valid markets
-        ranked_markets = self.ranking_engine.rank(tickers)
+        # Filter eligible markets before ranking
+        eligible_tickers = self.eligibility_filter.filter(tickers)
+
+        # Rank only eligible markets
+        ranked_markets = self.ranking_engine.rank(eligible_tickers)
 
         # Show system summary
         print()
         print("=" * 70)
-        print("BULK MARKET SNAPSHOT")
+        print("ATHENA MARKET PIPELINE")
         print("=" * 70)
-        print(f"Parsed Tickers : {len(tickers)}")
-        print(f"Cached Tickers : {self.scanner.get_ticker_count()}")
-        print(f"Ranked Markets : {len(ranked_markets)}")
+        print(f"Parsed Tickers   : {len(tickers)}")
+        print(f"Cached Tickers   : {self.scanner.get_ticker_count()}")
+        print(f"Eligible Markets : {len(eligible_tickers)}")
+        print(f"Ranked Markets   : {len(ranked_markets)}")
         print("=" * 70)
 
         # Show Top 10 market shortlist
