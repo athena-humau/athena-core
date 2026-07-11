@@ -11,6 +11,10 @@ class MarketScanner:
 
         self.cache.update_ticker(ticker)
 
+    def get_ticker_count(self):
+
+        return len(self.cache.get_all_tickers())
+
     def show_market(self):
 
         print()

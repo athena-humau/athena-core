@@ -4,33 +4,70 @@ import requests
 class MarketData:
 
     BASE_URL = "https://api.bitget.com"
+    TIMEOUT = 10
+
+    def _get(self, endpoint, params):
+
+        url = f"{self.BASE_URL}{endpoint}"
+
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=self.TIMEOUT
+            )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if data.get("code") != "00000":
+                raise RuntimeError(
+                    f"Bitget API error: "
+                    f"code={data.get('code')} "
+                    f"msg={data.get('msg')}"
+                )
+
+            return data
+
+        except requests.RequestException as error:
+            raise RuntimeError(
+                f"Bitget HTTP request failed: {error}"
+            ) from error
+
+        except ValueError as error:
+            raise RuntimeError(
+                "Bitget returned invalid JSON"
+            ) from error
 
     def get_ticker(self, symbol: str):
 
-        url = f"{self.BASE_URL}/api/v2/mix/market/ticker"
-
-        params = {
-            "symbol": symbol,
-            "productType": "USDT-FUTURES"
-        }
-
-        response = requests.get(url, params=params, timeout=10)
-
-        return response.json()
+        return self._get(
+            "/api/v2/mix/market/ticker",
+            {
+                "symbol": symbol,
+                "productType": "USDT-FUTURES"
+            }
+        )
 
     def get_symbols(self):
 
-        url = f"{self.BASE_URL}/api/v2/mix/market/contracts"
+        return self._get(
+            "/api/v2/mix/market/contracts",
+            {
+                "productType": "USDT-FUTURES"
+            }
+        )
 
-        params = {
-            "productType": "USDT-FUTURES"
-        }
+    def get_all_tickers(self):
 
-        response = requests.get(url, params=params, timeout=10)
+        return self._get(
+            "/api/v2/mix/market/tickers",
+            {
+                "productType": "USDT-FUTURES"
+            }
+        )
 
-        return response.json()
-
-    # 👇 Ye naya method add karo
     def get_multiple_tickers(self, symbols):
 
         tickers = []
@@ -38,12 +75,9 @@ class MarketData:
         for symbol in symbols:
 
             try:
-                response = self.get_ticker(symbol)
+                tickers.append(self.get_ticker(symbol))
 
-                if response.get("code") == "00000":
-                    tickers.append(response)
-
-            except Exception as e:
-                print(f"Error fetching {symbol}: {e}")
+            except RuntimeError as error:
+                print(f"Error fetching {symbol}: {error}")
 
         return tickers

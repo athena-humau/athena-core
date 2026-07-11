@@ -4,7 +4,6 @@ from exchange.parser import BitgetParser
 from scanner.market_scanner import MarketScanner
 
 from core.logger import log
-from config.constants import WATCHLIST
 
 
 class Athena:
@@ -17,20 +16,25 @@ class Athena:
 
     def run(self):
 
-        # Connect to exchange
         self.exchange.connect()
 
         log("ATHENA Core Initialized Successfully")
 
-        # Fetch market data for all symbols in watchlist
-        responses = self.market.get_multiple_tickers(WATCHLIST)
+        # Fetch complete market snapshot in one request
+        response = self.market.get_all_tickers()
 
-        # Parse and cache all tickers
-        for response in responses:
+        # Parse all valid ticker records
+        tickers = BitgetParser.parse_tickers(response)
 
-            ticker = BitgetParser.parse_ticker(response)
-
+        # Update market cache
+        for ticker in tickers:
             self.scanner.update(ticker)
 
-        # Display market cache
-        self.scanner.show_market()
+        # Show summary
+        print()
+        print("=" * 50)
+        print("BULK MARKET SNAPSHOT")
+        print("=" * 50)
+        print(f"Parsed Tickers : {len(tickers)}")
+        print(f"Cached Tickers : {self.scanner.get_ticker_count()}")
+        print("=" * 50)
