@@ -29,3 +29,21 @@ class MarketData:
         response = requests.get(url, params=params, timeout=10)
 
         return response.json()
+
+    # 👇 Ye naya method add karo
+    def get_multiple_tickers(self, symbols):
+
+        tickers = []
+
+        for symbol in symbols:
+
+            try:
+                response = self.get_ticker(symbol)
+
+                if response.get("code") == "00000":
+                    tickers.append(response)
+
+            except Exception as e:
+                print(f"Error fetching {symbol}: {e}")
+
+        return tickers
