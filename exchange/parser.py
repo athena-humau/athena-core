@@ -112,17 +112,26 @@ class BitgetParser:
     @staticmethod
     def parse_candles(response, symbol: str, granularity: str):
 
-        candles = []
-
         if response.get("code") != "00000":
-            return candles
+            return []
 
         data = response.get("data", [])
 
-        if not isinstance(data, list):
+        return BitgetParser.parse_candle_records(
+            data,
+            symbol,
+            granularity,
+        )
+
+    @staticmethod
+    def parse_candle_records(records, symbol: str, granularity: str):
+
+        candles = []
+
+        if not isinstance(records, list):
             return candles
 
-        for item in data:
+        for item in records:
 
             try:
                 candle = BitgetParser._parse_candle_item(
