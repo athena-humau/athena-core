@@ -1,3 +1,7 @@
+import math
+from datetime import datetime, timezone
+
+from data.candle import Candle
 from data.ticker import Ticker
 
 
@@ -50,3 +54,91 @@ class BitgetParser:
                 continue
 
         return tickers
+
+    @staticmethod
+    def _parse_candle_item(item, symbol, granularity):
+
+        if not isinstance(item, (list, tuple)) or len(item) < 7:
+            raise ValueError("Invalid candle record")
+
+        timestamp_ms = int(item[0])
+
+        if timestamp_ms < 0:
+            raise ValueError("Invalid candle timestamp")
+
+        open_price = float(item[1])
+        high = float(item[2])
+        low = float(item[3])
+        close = float(item[4])
+        volume = float(item[5])
+        quote_volume = float(item[6])
+
+        numeric_values = (
+            open_price,
+            high,
+            low,
+            close,
+            volume,
+            quote_volume,
+        )
+
+        if not all(math.isfinite(value) for value in numeric_values):
+            raise ValueError("Candle values must be finite")
+
+        if min(open_price, high, low, close) <= 0:
+            raise ValueError("Candle prices must be positive")
+
+        if volume < 0 or quote_volume < 0:
+            raise ValueError("Candle volumes cannot be negative")
+
+        if low > min(open_price, close) or high < max(open_price, close):
+            raise ValueError("Invalid candle OHLC relationship")
+
+        return Candle(
+            symbol=symbol,
+            timestamp=datetime.fromtimestamp(
+                timestamp_ms / 1000,
+                tz=timezone.utc,
+            ),
+            open=open_price,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            quote_volume=quote_volume,
+            granularity=granularity,
+        )
+
+    @staticmethod
+    def parse_candles(response, symbol: str, granularity: str):
+
+        candles = []
+
+        if response.get("code") != "00000":
+            return candles
+
+        data = response.get("data", [])
+
+        if not isinstance(data, list):
+            return candles
+
+        for item in data:
+
+            try:
+                candle = BitgetParser._parse_candle_item(
+                    item,
+                    symbol,
+                    granularity,
+                )
+                candles.append(candle)
+
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+                OverflowError,
+                OSError,
+            ):
+                continue
+
+        return candles

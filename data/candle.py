@@ -6,11 +6,14 @@ from datetime import datetime
 class Candle:
     symbol: str
 
+    timestamp: datetime
+
     open: float
     high: float
     low: float
     close: float
 
     volume: float
+    quote_volume: float
 
-    timestamp: datetime
+    granularity: str
