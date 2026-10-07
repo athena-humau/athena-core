@@ -6,6 +6,9 @@ from scanner.market_scanner import MarketScanner
 from scanner.eligibility_filter import MarketEligibilityFilter
 from scanner.ranking_engine import RankingEngine
 
+from market.pipeline import MarketAnalysisPipeline
+from config.settings import SHORTLIST_ANALYSIS_LIMIT
+
 from core.logger import log
 
 
@@ -18,6 +21,7 @@ class Athena:
         self.scanner = MarketScanner()
         self.eligibility_filter = MarketEligibilityFilter()
         self.ranking_engine = RankingEngine()
+        self.pipeline = MarketAnalysisPipeline()
 
     def run(self):
 
@@ -80,6 +84,57 @@ class Athena:
                 f"{market.liquidity_score:<10.2f}"
                 f"{market.movement_score:<10.2f}"
                 f"{market.spread_score:<10.2f}"
+            )
+
+        print("=" * 70)
+
+        # Analyze top ranked markets across multi-timeframes
+        log(f"Analyzing Top {SHORTLIST_ANALYSIS_LIMIT} Markets (Candles -> Features -> Regimes)...")
+        analyses = self.pipeline.analyze_shortlist(
+            ranked_markets,
+            limit=SHORTLIST_ANALYSIS_LIMIT,
+        )
+
+        print()
+        print("=" * 70)
+        print("TOP OPPORTUNITY MULTI-TIMEFRAME REGIME ANALYSIS")
+        print("=" * 70)
+        print(
+            f"{'SYMBOL':<14}"
+            f"{'STATUS':<10}"
+            f"{'1M':<10}"
+            f"{'5M':<10}"
+            f"{'15M':<10}"
+            f"{'1H':<10}"
+            f"{'4H':<10}"
+        )
+        print("-" * 70)
+
+        for analysis in analyses:
+            if not analysis.success:
+                print(f"{analysis.symbol:<14}{'FAILED':<10}{analysis.error or 'Unknown error'}")
+                continue
+
+            r1m = analysis.regimes_by_granularity.get("1m")
+            r5m = analysis.regimes_by_granularity.get("5m")
+            r15m = analysis.regimes_by_granularity.get("15m")
+            r1h = analysis.regimes_by_granularity.get("1H")
+            r4h = analysis.regimes_by_granularity.get("4H")
+
+            s1m = r1m.regime.value if r1m else "n/a"
+            s5m = r5m.regime.value if r5m else "n/a"
+            s15m = r15m.regime.value if r15m else "n/a"
+            s1h = r1h.regime.value if r1h else "n/a"
+            s4h = r4h.regime.value if r4h else "n/a"
+
+            print(
+                f"{analysis.symbol:<14}"
+                f"{'OK':<10}"
+                f"{s1m:<10}"
+                f"{s5m:<10}"
+                f"{s15m:<10}"
+                f"{s1h:<10}"
+                f"{s4h:<10}"
             )
 
         print("=" * 70)
