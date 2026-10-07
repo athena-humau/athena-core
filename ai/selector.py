@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence
+from typing import Any, Sequence
 
 from ai.models import StrategyCandidate, StrategySelection
 from strategy.context import StrategyContext
@@ -8,7 +8,8 @@ from strategy.context import StrategyContext
 class StrategySelector(ABC):
     """
     Abstract Base Class for all strategy selectors in ATHENA.
-    Evaluates StrategyContext and available StrategyCandidates to produce a StrategySelection.
+    Evaluates StrategyContext and available StrategyCandidates (or ranked evaluations)
+    to produce a StrategySelection.
     """
 
     selector_id: str = ""
@@ -26,7 +27,7 @@ class StrategySelector(ABC):
     def select(
         self,
         context: StrategyContext,
-        candidates: Sequence[StrategyCandidate],
+        candidates: Sequence[Any],
     ) -> StrategySelection:
         """
         Select a strategy among available candidates based on market context.

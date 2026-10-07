@@ -131,3 +131,33 @@ class StrategyEvaluation:
             "metadata",
             MappingProxyType(dict(self.metadata)),
         )
+
+
+@dataclass(frozen=True)
+class RankedStrategy:
+    """
+    Immutable representation of a ranked candidate strategy.
+    Preserves full evaluation evidence alongside rank position.
+    """
+    rank: int
+    evaluation: StrategyEvaluation
+
+    def __post_init__(self):
+        if not isinstance(self.rank, int) or isinstance(self.rank, bool):
+            raise ValueError("RankedStrategy rank must be an integer")
+        if self.rank < 1:
+            raise ValueError("RankedStrategy rank must be a positive integer (1-indexed)")
+        if not isinstance(self.evaluation, StrategyEvaluation):
+            raise ValueError("RankedStrategy evaluation must be a StrategyEvaluation instance")
+
+    @property
+    def strategy_id(self) -> str:
+        return self.evaluation.strategy_id
+
+    @property
+    def score(self) -> float:
+        return self.evaluation.score
+
+    @property
+    def eligible(self) -> bool:
+        return self.evaluation.eligible
