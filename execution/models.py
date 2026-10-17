@@ -38,6 +38,7 @@ class ExecutionStatus(str, Enum):
     REJECTED = "REJECTED"
     DUPLICATE = "DUPLICATE"
     CONFLICT = "CONFLICT"
+    FILLED = "FILLED"
 
 
 class IllegalOrderStateTransitionError(ValueError):

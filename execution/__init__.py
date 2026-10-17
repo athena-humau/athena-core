@@ -2,10 +2,11 @@
 ATHENA Execution Package.
 
 Provides the foundational execution request contracts, order lifecycle models,
-idempotency protection, and non-executing reference execution engine.
+idempotency protection, non-executing reference engine, and the simulated
+Paper Trading Engine (Sprint 30).
 
-NOTE: Sprint 29 establishes safety contracts and non-executing foundation only.
-It does NOT submit live exchange orders, execute paper trades, or access private exchange APIs.
+NOTE: All paper trading operations are strictly simulated and in-memory.
+They do NOT submit live exchange orders, execute real trades, or access private exchange APIs.
 """
 
 from execution.base import BaseExecutionEngine, ExecutionEngine
@@ -25,6 +26,14 @@ from execution.models import (
     is_valid_transition,
     validate_transition,
 )
+from execution.paper_engine import PaperTradingEngine
+from execution.paper_models import (
+    PaperExecutionResult,
+    PaperOrder,
+    PaperPortfolio,
+    PaperPosition,
+    PaperTrade,
+)
 
 __all__ = [
     "BaseExecutionEngine",
@@ -38,6 +47,12 @@ __all__ = [
     "LEGAL_TRANSITIONS",
     "OrderState",
     "OrderType",
+    "PaperExecutionResult",
+    "PaperOrder",
+    "PaperPortfolio",
+    "PaperPosition",
+    "PaperTrade",
+    "PaperTradingEngine",
     "TERMINAL_STATES",
     "is_valid_transition",
     "validate_transition",
