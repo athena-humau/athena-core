@@ -8,14 +8,14 @@ from scanner.ranking_engine import RankingEngine
 
 from market.pipeline import MarketAnalysisPipeline
 from execution.paper_workflow import PaperTradingWorkflow
-from config.settings import SHORTLIST_ANALYSIS_LIMIT
+from config.settings import SHORTLIST_ANALYSIS_LIMIT, PAPER_DB_PATH
 
 from core.logger import log
 
 
 class Athena:
 
-    def __init__(self):
+    def __init__(self, db_path: str | None = None):
 
         self.exchange = ExchangeManager().get_exchange()
         self.market = MarketData()
@@ -23,7 +23,8 @@ class Athena:
         self.eligibility_filter = MarketEligibilityFilter()
         self.ranking_engine = RankingEngine()
         self.pipeline = MarketAnalysisPipeline()
-        self.paper_workflow = PaperTradingWorkflow()
+        self.db_path = db_path if db_path is not None else PAPER_DB_PATH
+        self.paper_workflow = PaperTradingWorkflow(db_path=self.db_path)
 
     def run(self):
 

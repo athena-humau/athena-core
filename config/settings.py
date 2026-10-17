@@ -16,6 +16,7 @@ MOTTO = "Protect. Grow. Evolve."
 
 # Trading
 TRADING_MODE = "SIMULATION"
+PAPER_DB_PATH = "data/paper_trading.db"
 
 # Scanner
 SCAN_INTERVAL = 5

@@ -213,6 +213,7 @@ class PaperTradingWorkflow:
         default_leverage: float = 1.0,
         default_risk_pct: float = 2.0,
         workflow_id: str | None = None,
+        db_path: str | None = None,
     ):
         self.workflow_id = workflow_id or self.workflow_id
         self.reference_timeframe = reference_timeframe
@@ -229,7 +230,7 @@ class PaperTradingWorkflow:
             self.strategy_registry.register(RSIMeanReversionStrategy(timeframe=reference_timeframe))
 
         # 2. Paper Trading Engine
-        self.paper_engine = paper_engine or PaperTradingEngine()
+        self.paper_engine = paper_engine or PaperTradingEngine(db_path=db_path)
 
         # 3. Strategy Evaluator & Ranker
         self.evaluator = evaluator or DeterministicStrategyEvaluator(
@@ -822,6 +823,11 @@ class PaperTradingWorkflow:
     def get_closed_trades(self) -> tuple[PaperTrade, ...]:
         """Return all closed paper trades."""
         return self.paper_engine.get_closed_trades()
+
+    def close(self) -> None:
+        """Safely close paper trading engine and persistent resources."""
+        if hasattr(self.paper_engine, "close"):
+            self.paper_engine.close()
 
     # -------------------------------------------------------------------------
     # Internal Price Resolution & Sizing Helpers

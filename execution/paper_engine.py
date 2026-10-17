@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import math
+from pathlib import Path
 from typing import Any, Mapping
 
 from data.candle import Candle
@@ -18,15 +19,17 @@ from execution.paper_models import (
     PaperTrade,
     validate_finite_number,
 )
+from execution.paper_persistence import PaperStorage
 from risk.models import RiskAssessment, RiskVerdict
 from strategy.models import SignalDirection
 
 
 class PaperTradingEngine(ExecutionEngine):
     """
-    Simulated Paper Trading Engine for ATHENA (Sprint 30).
+    Simulated Paper Trading Engine for ATHENA (Sprint 30 & 33).
 
-    Operates strictly in-memory under documented accounting and fill models.
+    Operates under documented accounting and fill models.
+    Supports in-memory mode or durable SQLite persistence with restart recovery.
     Does NOT connect to exchange endpoints or execute live orders.
 
     Accounting Model (Linear USDT-Margined Futures):
@@ -38,7 +41,7 @@ class PaperTradingEngine(ExecutionEngine):
 
     engine_id: str = "paper_trading_engine"
     name: str = "ATHENA Paper Trading Engine"
-    description: str = "Deterministic in-memory simulated trade execution, portfolio accounting, and lifecycle manager"
+    description: str = "Deterministic simulated trade execution, portfolio accounting, lifecycle manager, and persistence"
 
     def __init__(
         self,
@@ -47,6 +50,8 @@ class PaperTradingEngine(ExecutionEngine):
         slippage_pct: float = 0.0,
         contract_multiplier: float = 1.0,
         engine_id: str | None = None,
+        db_path: str | Path | None = None,
+        storage: PaperStorage | None = None,
     ):
         super().__init__(engine_id=engine_id or self.engine_id)
 
@@ -77,8 +82,63 @@ class PaperTradingEngine(ExecutionEngine):
         self._position_counter = 0
         self._trade_counter = 0
 
+        # Persistence integration
+        if storage is not None:
+            self.storage = storage
+        elif db_path is not None:
+            self.storage = PaperStorage(db_path=db_path)
+        else:
+            self.storage = None
+
+        if self.storage is not None:
+            self._bootstrap_persistence()
+
+    def _bootstrap_persistence(self) -> None:
+        """Initialize database schema and restore existing ledger state or record initial state."""
+        self.storage.initialize_schema()
+        recovered = self.storage.load_ledger_state()
+
+        if recovered is not None:
+            # Restore state from durable storage without resetting to initial equity
+            self._starting_equity = recovered.starting_equity
+            self.fee_rate = recovered.fee_rate
+            self.slippage_pct = recovered.slippage_pct
+            self.contract_multiplier = recovered.contract_multiplier
+            self._cash = recovered.cash
+            self._realized_pnl = recovered.realized_pnl
+            self._fees_paid = recovered.fees_paid
+            self._order_counter = recovered.order_counter
+            self._position_counter = recovered.position_counter
+            self._trade_counter = recovered.trade_counter
+            self._positions = dict(recovered.open_positions)
+            self._trades = list(recovered.closed_trades)
+            self._orders = dict(recovered.orders)
+            self._idempotency_store = dict(recovered.idempotency_store)
+            self._idempotency_order_map = dict(recovered.idempotency_order_map)
+            self._idempotency_pos_map = dict(recovered.idempotency_pos_map)
+            self._reserved_margin = sum(p.required_margin for p in self._positions.values())
+        else:
+            # First initialization of fresh database
+            self.storage.save_portfolio_initialization(
+                starting_equity=self._starting_equity,
+                cash=self._cash,
+                fee_rate=self.fee_rate,
+                slippage_pct=self.slippage_pct,
+                contract_multiplier=self.contract_multiplier,
+            )
+
+    def close(self) -> None:
+        """Safely close active database connections if persistence is enabled."""
+        if self.storage is not None:
+            self.storage.close()
+
     def reset(self) -> None:
         """Reset the paper portfolio back to initial starting cash."""
+        if self.storage is not None:
+            raise RuntimeError(
+                "Resetting a persistent paper portfolio is prohibited to prevent accidental state loss. "
+                "Use an isolated test database or explicit purge method."
+            )
         self._cash = self._starting_equity
         self._reserved_margin = 0.0
         self._realized_pnl = 0.0
@@ -514,10 +574,10 @@ class PaperTradingEngine(ExecutionEngine):
                 )
 
         # 9. Commit State Mutation (Atomic)
-        self._order_counter += 1
-        self._position_counter += 1
-        order_id = f"paper_ord_{self._order_counter:06d}"
-        position_id = f"paper_pos_{self._position_counter:06d}"
+        next_order_counter = self._order_counter + 1
+        next_pos_counter = self._position_counter + 1
+        order_id = f"paper_ord_{next_order_counter:06d}"
+        position_id = f"paper_pos_{next_pos_counter:06d}"
         now_utc = datetime.now(timezone.utc)
 
         order = PaperOrder(
@@ -559,10 +619,43 @@ class PaperTradingEngine(ExecutionEngine):
             metadata={"strategy_id": request.strategy_id},
         )
 
-        # Deduct cash, reserve margin, add fee
-        self._cash -= total_cash_required
+        new_cash = self._cash - total_cash_required
+        new_fees = self._fees_paid + entry_fee
+
+        # Persist to durable storage first if persistence is enabled
+        if self.storage is not None:
+            try:
+                self.storage.record_order_fill(
+                    order=order,
+                    position=position,
+                    key=key,
+                    canonical_payload=canonical,
+                    cash=new_cash,
+                    fees_paid=new_fees,
+                    order_counter=next_order_counter,
+                    position_counter=next_pos_counter,
+                )
+            except Exception as exc:
+                # Transaction failed and rolled back; in-memory state remains untouched
+                return PaperExecutionResult(
+                    status=ExecutionStatus.REJECTED,
+                    order_state=OrderState.REJECTED,
+                    order=None,
+                    position=None,
+                    trade=None,
+                    portfolio=snapshot_before,
+                    reason_codes=("PERSISTENCE_TRANSACTION_FAILED",),
+                    explanation=f"Durable database write failed; transaction rolled back: {exc}",
+                    audit_evidence={"persistence": {"status": "FAIL", "error": str(exc)}},
+                    request=request,
+                )
+
+        # Apply in-memory state mutations only after durable commit succeeds
+        self._order_counter = next_order_counter
+        self._position_counter = next_pos_counter
+        self._cash = new_cash
         self._reserved_margin += required_margin
-        self._fees_paid += entry_fee
+        self._fees_paid = new_fees
 
         self._orders[order_id] = order
         self._positions[position_id] = position
@@ -643,13 +736,11 @@ class PaperTradingEngine(ExecutionEngine):
         net_pnl = gross_pnl - entry_fee_portion - exit_fee
 
         # Accounting mutation
-        self._cash += released_margin + gross_pnl - exit_fee
-        self._reserved_margin -= released_margin
-        self._realized_pnl += gross_pnl
-        self._fees_paid += exit_fee
-
-        self._trade_counter += 1
-        trade_id = f"paper_trd_{self._trade_counter:06d}"
+        new_cash = self._cash + released_margin + gross_pnl - exit_fee
+        new_realized_pnl = self._realized_pnl + gross_pnl
+        new_fees = self._fees_paid + exit_fee
+        next_trade_counter = self._trade_counter + 1
+        trade_id = f"paper_trd_{next_trade_counter:06d}"
 
         trade = PaperTrade(
             trade_id=trade_id,
@@ -672,11 +763,8 @@ class PaperTradingEngine(ExecutionEngine):
             is_paper=True,
         )
 
-        self._trades.append(trade)
-
-        if is_full_close:
-            del self._positions[position_id]
-        else:
+        updated_pos = None
+        if not is_full_close:
             # Update remaining position state
             rem_qty = pos.quantity - close_qty
             rem_notional = pos.notional * (1.0 - ratio)
@@ -703,6 +791,31 @@ class PaperTradingEngine(ExecutionEngine):
                 is_paper=True,
                 metadata=pos.metadata,
             )
+
+        # Persist to durable storage first if persistence is enabled
+        if self.storage is not None:
+            self.storage.record_position_close(
+                trade=trade,
+                position=pos,
+                is_full_close=is_full_close,
+                cash=new_cash,
+                realized_pnl=new_realized_pnl,
+                fees_paid=new_fees,
+                trade_counter=next_trade_counter,
+                updated_position=updated_pos,
+            )
+
+        # Apply in-memory state mutations only after durable commit succeeds
+        self._trade_counter = next_trade_counter
+        self._cash = new_cash
+        self._reserved_margin -= released_margin
+        self._realized_pnl = new_realized_pnl
+        self._fees_paid = new_fees
+        self._trades.append(trade)
+
+        if is_full_close:
+            del self._positions[position_id]
+        else:
             self._positions[position_id] = updated_pos
 
         return trade

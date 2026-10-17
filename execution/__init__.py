@@ -34,6 +34,14 @@ from execution.paper_models import (
     PaperPosition,
     PaperTrade,
 )
+from execution.paper_persistence import (
+    DatabaseCorruptionError,
+    IncompatibleSchemaError,
+    PaperStorage,
+    PersistenceError,
+    RecoveredLedgerState,
+    TransactionError,
+)
 from execution.paper_workflow import (
     CandidateProcessingStatus,
     CandidateWorkflowResult,
@@ -44,6 +52,7 @@ __all__ = [
     "BaseExecutionEngine",
     "CandidateProcessingStatus",
     "CandidateWorkflowResult",
+    "DatabaseCorruptionError",
     "DeterministicExecutionEngine",
     "ExecutionEngine",
     "ExecutionRequest",
@@ -51,6 +60,7 @@ __all__ = [
     "ExecutionStatus",
     "FoundationOnlyExecutionEngine",
     "IllegalOrderStateTransitionError",
+    "IncompatibleSchemaError",
     "LEGAL_TRANSITIONS",
     "OrderState",
     "OrderType",
@@ -58,10 +68,14 @@ __all__ = [
     "PaperOrder",
     "PaperPortfolio",
     "PaperPosition",
+    "PaperStorage",
     "PaperTrade",
     "PaperTradingEngine",
     "PaperTradingWorkflow",
+    "PersistenceError",
+    "RecoveredLedgerState",
     "TERMINAL_STATES",
+    "TransactionError",
     "is_valid_transition",
     "validate_transition",
 ]
