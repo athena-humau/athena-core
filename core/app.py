@@ -105,6 +105,8 @@ class Athena:
             position_monitor_callback=self._execute_position_monitor_cycle,
             cleanup_callback=self.close,
             lock=self._lock,
+            circuit_breaker_callback=lambda: getattr(self.paper_workflow, "circuit_breaker", None) is not None and self.paper_workflow.circuit_breaker.is_triggered,
+            open_positions_callback=lambda: self.paper_workflow.get_open_positions(),
         )
 
     # -------------------------------------------------------------------------
@@ -297,6 +299,8 @@ class Athena:
                 position_monitor_callback=self._execute_position_monitor_cycle,
                 cleanup_callback=self.close,
                 lock=self._lock,
+                circuit_breaker_callback=lambda: getattr(self.paper_workflow, "circuit_breaker", None) is not None and self.paper_workflow.circuit_breaker.is_triggered,
+                open_positions_callback=lambda: self.paper_workflow.get_open_positions(),
             )
 
         return self.runtime.run()
@@ -329,6 +333,21 @@ class Athena:
         """Return an immutable snapshot of current paper portfolio state."""
         with self._lock:
             return self.paper_workflow.get_portfolio_snapshot()
+
+    @property
+    def circuit_breaker(self) -> Any:
+        """Expose the underlying portfolio circuit breaker instance."""
+        return getattr(self.paper_workflow, "circuit_breaker", None)
+
+    def get_circuit_breaker_status(self) -> Any:
+        """Return current circuit breaker status snapshot."""
+        if hasattr(self.paper_workflow, "get_circuit_breaker_status"):
+            return self.paper_workflow.get_circuit_breaker_status()
+        return None
+
+    def reset_circuit_breaker(self, operator: str, reason: str, timestamp: datetime | None = None) -> Any:
+        """Operator reset of the portfolio circuit breaker latch."""
+        return self.paper_workflow.reset_circuit_breaker(operator=operator, reason=reason, timestamp=timestamp)
 
     def close(self) -> None:
         """Safely close paper workflow and underlying persistent storage."""

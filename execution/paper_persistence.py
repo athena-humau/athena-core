@@ -60,6 +60,7 @@ class RecoveredLedgerState:
     idempotency_order_map: dict[str, str] = field(default_factory=dict)
     idempotency_pos_map: dict[str, str] = field(default_factory=dict)
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    circuit_breaker: Any = None
 
 
 class PaperStorage:
@@ -286,6 +287,27 @@ class PaperStorage:
                         );
                         """
                     )
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS portfolio_circuit_breaker (
+                            id INTEGER PRIMARY KEY CHECK (id = 1),
+                            state TEXT NOT NULL,
+                            high_water_mark REAL NOT NULL,
+                            current_equity REAL NOT NULL,
+                            drawdown_pct REAL NOT NULL,
+                            threshold_pct REAL NOT NULL,
+                            is_triggered INTEGER NOT NULL DEFAULT 0,
+                            triggered_at TEXT,
+                            trigger_equity REAL,
+                            trigger_hwm REAL,
+                            trigger_reason TEXT,
+                            session_id TEXT,
+                            reset_at TEXT,
+                            reset_reason TEXT,
+                            updated_at TEXT NOT NULL
+                        );
+                        """
+                    )
 
                     now_iso = datetime.now(timezone.utc).isoformat()
                     cursor.execute(
@@ -305,6 +327,29 @@ class PaperStorage:
                     )
                 if current_ver < 1:
                     raise DatabaseCorruptionError(f"Invalid schema version {current_ver} in '{self.db_path}'")
+
+                # Ensure portfolio_circuit_breaker exists in existing schema
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS portfolio_circuit_breaker (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        state TEXT NOT NULL,
+                        high_water_mark REAL NOT NULL,
+                        current_equity REAL NOT NULL,
+                        drawdown_pct REAL NOT NULL,
+                        threshold_pct REAL NOT NULL,
+                        is_triggered INTEGER NOT NULL DEFAULT 0,
+                        triggered_at TEXT,
+                        trigger_equity REAL,
+                        trigger_hwm REAL,
+                        trigger_reason TEXT,
+                        session_id TEXT,
+                        reset_at TEXT,
+                        reset_reason TEXT,
+                        updated_at TEXT NOT NULL
+                    );
+                    """
+                )
 
                 return current_ver
 
@@ -739,6 +784,9 @@ class PaperStorage:
                 if row["position_id"]:
                     idempotency_pos_map[k] = row["position_id"]
 
+            # 6. Load Circuit Breaker State if available
+            circuit_breaker_state = self.load_circuit_breaker_state()
+
             return RecoveredLedgerState(
                 starting_equity=starting_equity,
                 cash=cash,
@@ -757,6 +805,7 @@ class PaperStorage:
                 idempotency_order_map=idempotency_order_map,
                 idempotency_pos_map=idempotency_pos_map,
                 updated_at=updated_at,
+                circuit_breaker=circuit_breaker_state,
             )
 
         except (IncompatibleSchemaError, DatabaseCorruptionError):
@@ -765,3 +814,101 @@ class PaperStorage:
             raise DatabaseCorruptionError(f"Corrupted or invalid database records in '{self.db_path}': {err}") from err
         except Exception as err:
             raise PersistenceError(f"Failed to load ledger state from '{self.db_path}': {err}") from err
+
+    def save_circuit_breaker_state(self, status: Any) -> None:
+        """
+        Durably persist portfolio circuit breaker state in an atomic transaction.
+        """
+        conn = self.get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO portfolio_circuit_breaker (
+                        id, state, high_water_mark, current_equity, drawdown_pct, threshold_pct,
+                        is_triggered, triggered_at, trigger_equity, trigger_hwm, trigger_reason,
+                        session_id, reset_at, reset_reason, updated_at
+                    ) VALUES (
+                        1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    ON CONFLICT(id) DO UPDATE SET
+                        state = excluded.state,
+                        high_water_mark = excluded.high_water_mark,
+                        current_equity = excluded.current_equity,
+                        drawdown_pct = excluded.drawdown_pct,
+                        threshold_pct = excluded.threshold_pct,
+                        is_triggered = excluded.is_triggered,
+                        triggered_at = excluded.triggered_at,
+                        trigger_equity = excluded.trigger_equity,
+                        trigger_hwm = excluded.trigger_hwm,
+                        trigger_reason = excluded.trigger_reason,
+                        session_id = excluded.session_id,
+                        reset_at = excluded.reset_at,
+                        reset_reason = excluded.reset_reason,
+                        updated_at = excluded.updated_at;
+                    """,
+                    (
+                        status.state.value if hasattr(status.state, "value") else str(status.state),
+                        float(status.high_water_mark),
+                        float(status.current_equity),
+                        float(status.drawdown_pct),
+                        float(status.threshold_pct),
+                        1 if status.is_triggered else 0,
+                        status.triggered_at.isoformat() if status.triggered_at else None,
+                        float(status.trigger_equity) if status.trigger_equity is not None else None,
+                        float(status.trigger_hwm) if status.trigger_hwm is not None else None,
+                        status.trigger_reason,
+                        status.session_id,
+                        status.reset_at.isoformat() if status.reset_at else None,
+                        status.reset_reason,
+                        status.updated_at.isoformat() if status.updated_at else datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+        except sqlite3.DatabaseError as err:
+            raise TransactionError(f"Atomic save_circuit_breaker_state failed; rolled back: {err}") from err
+
+    def load_circuit_breaker_state(self) -> Any | None:
+        """
+        Load persisted circuit breaker status if present.
+        Returns CircuitBreakerStatus or None.
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT state, high_water_mark, current_equity, drawdown_pct, threshold_pct,
+                       is_triggered, triggered_at, trigger_equity, trigger_hwm, trigger_reason,
+                       session_id, reset_at, reset_reason, updated_at
+                FROM portfolio_circuit_breaker WHERE id = 1;
+                """
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+            from risk.circuit_breaker import CircuitBreakerState, CircuitBreakerStatus
+
+            return CircuitBreakerStatus(
+                state=CircuitBreakerState(row["state"]),
+                high_water_mark=float(row["high_water_mark"]),
+                current_equity=float(row["current_equity"]),
+                drawdown_pct=float(row["drawdown_pct"]),
+                threshold_pct=float(row["threshold_pct"]),
+                is_triggered=bool(row["is_triggered"]),
+                triggered_at=datetime.fromisoformat(row["triggered_at"]) if row["triggered_at"] else None,
+                trigger_equity=float(row["trigger_equity"]) if row["trigger_equity"] is not None else None,
+                trigger_hwm=float(row["trigger_hwm"]) if row["trigger_hwm"] is not None else None,
+                trigger_reason=row["trigger_reason"],
+                session_id=row["session_id"],
+                reset_at=datetime.fromisoformat(row["reset_at"]) if row["reset_at"] else None,
+                reset_reason=row["reset_reason"],
+                updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else datetime.now(timezone.utc),
+            )
+        except (IncompatibleSchemaError, DatabaseCorruptionError):
+            raise
+        except sqlite3.DatabaseError as err:
+            raise DatabaseCorruptionError(f"Corrupted circuit breaker state in '{self.db_path}': {err}") from err
+        except Exception as err:
+            raise PersistenceError(f"Failed to load circuit breaker state from '{self.db_path}': {err}") from err

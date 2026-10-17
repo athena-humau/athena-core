@@ -21,6 +21,7 @@ RUNTIME_MODE = "ONE_SHOT"  # "ONE_SHOT" or "CONTINUOUS"
 POSITION_MONITOR_INTERVAL = 1  # Seconds between active position price checks
 MAX_RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 1.0
+MAX_PORTFOLIO_DRAWDOWN_PCT = 20.0  # Maximum portfolio drawdown threshold percentage
 
 # Scanner
 SCAN_INTERVAL = 5

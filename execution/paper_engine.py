@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
+from config.settings import MAX_PORTFOLIO_DRAWDOWN_PCT
 from data.candle import Candle
 from execution.base import ExecutionEngine
 from execution.models import (
@@ -20,6 +21,11 @@ from execution.paper_models import (
     validate_finite_number,
 )
 from execution.paper_persistence import PaperStorage
+from risk.circuit_breaker import (
+    CircuitBreakerState,
+    CircuitBreakerStatus,
+    PortfolioCircuitBreaker,
+)
 from risk.models import RiskAssessment, RiskVerdict
 from strategy.models import SignalDirection
 
@@ -52,6 +58,8 @@ class PaperTradingEngine(ExecutionEngine):
         engine_id: str | None = None,
         db_path: str | Path | None = None,
         storage: PaperStorage | None = None,
+        max_drawdown_pct: float = MAX_PORTFOLIO_DRAWDOWN_PCT,
+        circuit_breaker: PortfolioCircuitBreaker | None = None,
     ):
         super().__init__(engine_id=engine_id or self.engine_id)
 
@@ -92,6 +100,18 @@ class PaperTradingEngine(ExecutionEngine):
 
         if self.storage is not None:
             self._bootstrap_persistence()
+
+        # Circuit Breaker integration
+        if circuit_breaker is not None:
+            self.circuit_breaker = circuit_breaker
+        else:
+            initial_equity = self.get_portfolio_snapshot().total_equity
+            self.circuit_breaker = PortfolioCircuitBreaker(
+                threshold_pct=max_drawdown_pct,
+                initial_equity=initial_equity,
+                storage=self.storage,
+            )
+            self.circuit_breaker.evaluate(initial_equity)
 
     def _bootstrap_persistence(self) -> None:
         """Initialize database schema and restore existing ledger state or record initial state."""
@@ -152,6 +172,12 @@ class PaperTradingEngine(ExecutionEngine):
         self._order_counter = 0
         self._position_counter = 0
         self._trade_counter = 0
+        if hasattr(self, "circuit_breaker") and self.circuit_breaker is not None:
+            self.circuit_breaker = PortfolioCircuitBreaker(
+                threshold_pct=self.circuit_breaker.threshold_pct,
+                initial_equity=self._starting_equity,
+                storage=None,
+            )
 
     def get_portfolio_snapshot(self, timestamp: datetime | None = None) -> PaperPortfolio:
         """Generate an immutable snapshot of the current portfolio state."""
@@ -224,6 +250,35 @@ class PaperTradingEngine(ExecutionEngine):
                 explanation=f"Expected ExecutionRequest, got {type(request).__name__}",
                 audit_evidence={"request": {"status": "FAIL", "reason": f"Expected ExecutionRequest, got {type(request).__name__}"}},
                 request=None,
+            )
+
+        # 1b. Portfolio Drawdown Circuit Breaker check
+        if self.circuit_breaker.is_triggered:
+            cb_status = self.circuit_breaker.get_status()
+            return PaperExecutionResult(
+                status=ExecutionStatus.REJECTED,
+                order_state=OrderState.REJECTED,
+                order=None,
+                position=None,
+                trade=None,
+                portfolio=snapshot_before,
+                reason_codes=("CIRCUIT_BREAKER_ACTIVE",),
+                explanation=(
+                    f"Simulated order rejected: Portfolio drawdown circuit breaker is ACTIVE "
+                    f"(Drawdown: {cb_status.drawdown_pct:.2f}% >= {cb_status.threshold_pct:.2f}%, "
+                    f"HWM: {cb_status.high_water_mark:.2f} USDT, Equity: {cb_status.current_equity:.2f} USDT)"
+                ),
+                audit_evidence={
+                    "circuit_breaker": {
+                        "status": "FAIL",
+                        "reason": "CIRCUIT_BREAKER_ACTIVE",
+                        "drawdown_pct": cb_status.drawdown_pct,
+                        "threshold_pct": cb_status.threshold_pct,
+                        "high_water_mark": cb_status.high_water_mark,
+                        "current_equity": cb_status.current_equity,
+                    }
+                },
+                request=request,
             )
 
         # 2. Risk Provenance & Integrity checks
@@ -664,6 +719,7 @@ class PaperTradingEngine(ExecutionEngine):
         self._idempotency_pos_map[key] = position_id
 
         snapshot_after = self.get_portfolio_snapshot(timestamp=now_utc)
+        self.circuit_breaker.evaluate(snapshot_after.total_equity, timestamp=now_utc)
 
         return PaperExecutionResult(
             status=ExecutionStatus.FILLED,
@@ -818,6 +874,9 @@ class PaperTradingEngine(ExecutionEngine):
         else:
             self._positions[position_id] = updated_pos
 
+        snapshot_after = self.get_portfolio_snapshot(timestamp=now_ts)
+        self.circuit_breaker.evaluate(snapshot_after.total_equity, timestamp=now_ts)
+
         return trade
 
     def update_market_price(
@@ -890,6 +949,9 @@ class PaperTradingEngine(ExecutionEngine):
                     metadata=pos.metadata,
                 )
                 self._positions[pid] = updated_pos
+
+        snapshot_after = self.get_portfolio_snapshot(timestamp=now_ts)
+        self.circuit_breaker.evaluate(snapshot_after.total_equity, timestamp=now_ts)
 
         return closed_trades
 
@@ -1023,5 +1085,8 @@ class PaperTradingEngine(ExecutionEngine):
                         metadata=pos.metadata,
                     )
                     self._positions[pid] = updated_pos
+
+        snapshot_after = self.get_portfolio_snapshot(timestamp=candle.timestamp)
+        self.circuit_breaker.evaluate(snapshot_after.total_equity, timestamp=candle.timestamp)
 
         return closed_trades

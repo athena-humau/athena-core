@@ -208,12 +208,16 @@ class ContinuousRuntime:
         position_monitor_callback: Callable[[], list[PaperTrade]],
         cleanup_callback: Callable[[], None] | None = None,
         lock: threading.RLock | None = None,
+        circuit_breaker_callback: Callable[[], bool] | None = None,
+        open_positions_callback: Callable[[], Sequence[Any]] | None = None,
     ):
         self.config = config
         self.scan_cycle_callback = scan_cycle_callback
         self.position_monitor_callback = position_monitor_callback
         self.cleanup_callback = cleanup_callback
         self.lock = lock or threading.RLock()
+        self.circuit_breaker_callback = circuit_breaker_callback
+        self.open_positions_callback = open_positions_callback
 
         self._stop_event = threading.Event()
         self.metrics = RuntimeMetrics()
@@ -351,6 +355,11 @@ class ContinuousRuntime:
         log("[SCAN WORKER] Active scan worker loop initialized")
 
         while not self._stop_event.is_set():
+            # Check circuit breaker before starting scan cycle
+            if self.circuit_breaker_callback is not None and self.circuit_breaker_callback():
+                log("[SCAN WORKER] Portfolio circuit breaker is TRIGGERED. Halting scan worker.")
+                break
+
             # Check cycle limit before starting
             if self.config.max_cycles is not None and self.metrics.cycles_completed >= self.config.max_cycles:
                 self.metrics.exit_reason = "MAX_CYCLES_REACHED"
@@ -378,6 +387,11 @@ class ContinuousRuntime:
                 self.metrics.last_scan_duration = time.time() - cycle_start
                 log(f"[SCAN WORKER ERROR] Cycle failed with exception: {exc}")
 
+            # Check circuit breaker after cycle completion
+            if self.circuit_breaker_callback is not None and self.circuit_breaker_callback():
+                log("[SCAN WORKER] Portfolio circuit breaker triggered after scan cycle. Halting scan worker.")
+                break
+
             # Check cycle limit after completion
             if self.config.max_cycles is not None and self.metrics.cycles_completed >= self.config.max_cycles:
                 self.metrics.exit_reason = "MAX_CYCLES_REACHED"
@@ -395,6 +409,18 @@ class ContinuousRuntime:
         log("[MONITOR WORKER] Active position monitor worker loop initialized")
 
         while not self._stop_event.is_set():
+            cb_triggered = self.circuit_breaker_callback is not None and self.circuit_breaker_callback()
+            open_pos = self.open_positions_callback() if self.open_positions_callback is not None else ()
+
+            if cb_triggered and len(open_pos) == 0:
+                log(
+                    "[MONITOR WORKER] Circuit breaker is TRIGGERED and portfolio is flat (0 open positions). "
+                    "Initiating controlled graceful shutdown."
+                )
+                self.metrics.exit_reason = "CIRCUIT_BREAKER_TRIGGERED"
+                self._stop_event.set()
+                break
+
             monitor_start = time.time()
             try:
                 closed_trades = self.position_monitor_callback()
@@ -412,6 +438,18 @@ class ContinuousRuntime:
                 self.metrics.monitor_checks_failed += 1
                 self.metrics.last_monitor_duration = time.time() - monitor_start
                 log(f"[MONITOR WORKER ERROR] Position monitor check failed: {exc}")
+
+            # Re-check after monitor check: if breaker is triggered and now all positions are closed, shutdown!
+            if cb_triggered:
+                open_pos_after = self.open_positions_callback() if self.open_positions_callback is not None else ()
+                if len(open_pos_after) == 0:
+                    log(
+                        "[MONITOR WORKER] Circuit breaker is TRIGGERED and all positions closed (flat). "
+                        "Initiating controlled graceful shutdown."
+                    )
+                    self.metrics.exit_reason = "CIRCUIT_BREAKER_TRIGGERED"
+                    self._stop_event.set()
+                    break
 
             # Responsive wait for next interval
             if self._stop_event.wait(timeout=self.config.position_monitor_interval):

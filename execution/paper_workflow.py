@@ -312,6 +312,22 @@ class PaperTradingWorkflow:
                 processed_at=now_ts,
             )
 
+        # 1b. Check Portfolio Drawdown Circuit Breaker
+        if hasattr(self.paper_engine, "circuit_breaker") and self.paper_engine.circuit_breaker.is_triggered:
+            cb_status = self.paper_engine.circuit_breaker.get_status()
+            return CandidateWorkflowResult(
+                symbol=symbol,
+                status=CandidateProcessingStatus.RISK_REJECTED,
+                analysis=analysis,
+                reason_codes=("CIRCUIT_BREAKER_ACTIVE",),
+                explanation=(
+                    f"Candidate processing halted: Portfolio circuit breaker is ACTIVE "
+                    f"(Drawdown: {cb_status.drawdown_pct:.2f}% >= {cb_status.threshold_pct:.2f}%, "
+                    f"HWM: {cb_status.high_water_mark:.2f} USDT, Equity: {cb_status.current_equity:.2f} USDT)"
+                ),
+                processed_at=now_ts,
+            )
+
         # 2. Build StrategyContext
         try:
             context = StrategyContext(
@@ -833,6 +849,23 @@ class PaperTradingWorkflow:
         """Safely close paper trading engine and persistent resources."""
         if hasattr(self.paper_engine, "close"):
             self.paper_engine.close()
+
+    @property
+    def circuit_breaker(self) -> Any:
+        """Expose underlying PortfolioCircuitBreaker instance."""
+        return getattr(self.paper_engine, "circuit_breaker", None)
+
+    def get_circuit_breaker_status(self) -> Any:
+        """Return immutable CircuitBreakerStatus snapshot or None."""
+        if hasattr(self.paper_engine, "circuit_breaker") and self.paper_engine.circuit_breaker is not None:
+            return self.paper_engine.circuit_breaker.get_status()
+        return None
+
+    def reset_circuit_breaker(self, operator: str, reason: str, timestamp: datetime | None = None) -> Any:
+        """Explicit, authorized operator reset of the portfolio circuit breaker latch."""
+        if hasattr(self.paper_engine, "circuit_breaker") and self.paper_engine.circuit_breaker is not None:
+            return self.paper_engine.circuit_breaker.reset(operator=operator, reason=reason, timestamp=timestamp)
+        raise RuntimeError("No circuit breaker configured on paper trading engine")
 
     # -------------------------------------------------------------------------
     # Internal Price Resolution & Sizing Helpers
