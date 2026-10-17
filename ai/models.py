@@ -235,3 +235,144 @@ class ValidatedCandidate:
     @property
     def is_valid(self) -> bool:
         return self.status == ValidationStatus.PASSED
+
+
+class JudgeVerdict(str, Enum):
+    PASS = "PASS"
+    REJECT = "REJECT"
+
+
+@dataclass(frozen=True)
+class FactorEvidence:
+    """
+    Immutable representation of an individual factor evaluated by the Judge.
+    """
+    factor_name: str
+    status: str
+    score: float
+    reason: str
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not isinstance(self.factor_name, str) or not self.factor_name:
+            raise ValueError("FactorEvidence factor_name must be a non-empty string")
+
+        if not isinstance(self.status, str) or not self.status:
+            raise ValueError("FactorEvidence status must be a non-empty string")
+
+        if not isinstance(self.score, (int, float)) or isinstance(self.score, bool):
+            raise ValueError("FactorEvidence score must be a float between 0.0 and 1.0")
+
+        if not (0.0 <= float(self.score) <= 1.0):
+            raise ValueError("FactorEvidence score must be between 0.0 and 1.0")
+
+        if not isinstance(self.reason, str):
+            raise ValueError("FactorEvidence reason must be a string")
+
+        if not isinstance(self.evidence, (dict, Mapping)):
+            raise ValueError("FactorEvidence evidence must be a mapping")
+
+        object.__setattr__(
+            self,
+            "evidence",
+            MappingProxyType(dict(self.evidence)),
+        )
+
+
+@dataclass(frozen=True)
+class JudgeDecision:
+    """
+    Immutable structured decision output from the Judge Engine.
+    NOTE: A PASS decision confirms that multi-factor evidence satisfies configured criteria.
+    It does NOT authorize order execution, calculate leverage, or predict profit.
+    """
+    verdict: JudgeVerdict
+    symbol: str
+    strategy_id: str
+    direction: SignalDirection | None
+    confidence: float
+    score: float
+    reason_codes: tuple[str, ...]
+    explanation: str
+    factor_evidence: Mapping[str, FactorEvidence] = field(default_factory=dict)
+    candidate: ValidatedCandidate | None = None
+    policy_id: str = "deterministic_v1"
+    decision_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not isinstance(self.verdict, JudgeVerdict):
+            raise ValueError("JudgeDecision verdict must be an instance of JudgeVerdict")
+
+        if not isinstance(self.symbol, str):
+            raise ValueError("JudgeDecision symbol must be a string")
+
+        if not isinstance(self.strategy_id, str):
+            raise ValueError("JudgeDecision strategy_id must be a string")
+
+        if self.direction is not None and not isinstance(self.direction, SignalDirection):
+            raise ValueError("JudgeDecision direction must be an instance of SignalDirection or None")
+
+        if not isinstance(self.confidence, (int, float)) or isinstance(self.confidence, bool):
+            raise ValueError("JudgeDecision confidence must be a float between 0.0 and 1.0")
+
+        if not (0.0 <= float(self.confidence) <= 1.0):
+            raise ValueError("JudgeDecision confidence must be between 0.0 and 1.0")
+
+        if not isinstance(self.score, (int, float)) or isinstance(self.score, bool):
+            raise ValueError("JudgeDecision score must be a float between 0.0 and 1.0")
+
+        if not (0.0 <= float(self.score) <= 1.0):
+            raise ValueError("JudgeDecision score must be between 0.0 and 1.0")
+
+        if not isinstance(self.reason_codes, (list, tuple)):
+            raise ValueError("JudgeDecision reason_codes must be a sequence of strings")
+
+        if not all(isinstance(rc, str) and rc for rc in self.reason_codes):
+            raise ValueError("JudgeDecision reason_codes elements must be non-empty strings")
+
+        if not isinstance(self.explanation, str):
+            raise ValueError("JudgeDecision explanation must be a string")
+
+        if not isinstance(self.factor_evidence, (dict, Mapping)):
+            raise ValueError("JudgeDecision factor_evidence must be a mapping")
+
+        if self.candidate is not None and not isinstance(self.candidate, ValidatedCandidate):
+            raise ValueError("JudgeDecision candidate must be a ValidatedCandidate or None")
+
+        if self.verdict == JudgeVerdict.PASS:
+            if self.candidate is None or not self.candidate.is_valid:
+                raise ValueError("Cannot produce a passing JudgeDecision for an invalid or missing candidate")
+
+        if not isinstance(self.policy_id, str) or not self.policy_id:
+            raise ValueError("JudgeDecision policy_id must be a non-empty string")
+
+        if not isinstance(self.decision_timestamp, datetime):
+            raise ValueError("JudgeDecision decision_timestamp must be a datetime instance")
+
+        if not isinstance(self.metadata, (dict, Mapping)):
+            raise ValueError("JudgeDecision metadata must be a mapping")
+
+        object.__setattr__(
+            self,
+            "reason_codes",
+            tuple(str(rc) for rc in self.reason_codes),
+        )
+        object.__setattr__(
+            self,
+            "factor_evidence",
+            MappingProxyType(dict(self.factor_evidence)),
+        )
+        object.__setattr__(
+            self,
+            "metadata",
+            MappingProxyType(dict(self.metadata)),
+        )
+
+    @property
+    def is_passed(self) -> bool:
+        return self.verdict == JudgeVerdict.PASS
+
+    @property
+    def is_rejected(self) -> bool:
+        return self.verdict == JudgeVerdict.REJECT
