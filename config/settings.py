@@ -17,6 +17,10 @@ MOTTO = "Protect. Grow. Evolve."
 # Trading
 TRADING_MODE = "SIMULATION"
 PAPER_DB_PATH = "data/paper_trading.db"
+RUNTIME_MODE = "ONE_SHOT"  # "ONE_SHOT" or "CONTINUOUS"
+POSITION_MONITOR_INTERVAL = 1  # Seconds between active position price checks
+MAX_RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 1.0
 
 # Scanner
 SCAN_INTERVAL = 5

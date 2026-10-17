@@ -1,8 +1,8 @@
 # ATHENA Staged Paper Soak Roadmap & Readiness Handoff
 
-**Status:** HANDOFF FOR FUTURE SOAK EXECUTION  
+**Status:** GATES A & B PASSED — READY FOR STAGE 1 OPERATOR AUTHORIZATION  
 **Mode:** PAPER / SIMULATION ONLY  
-**Current Phase:** Sprint 33 (Persistence & Recovery Gate Passed)  
+**Current Phase:** Sprint 34 Completed (Continuous Runtime & Position Monitoring Passed)  
 **Live Trading:** STRICTLY PROHIBITED  
 
 ---
@@ -12,8 +12,8 @@
 This document formalizes the staged progression roadmap for controlled paper soak operations in ATHENA. 
 
 > [!IMPORTANT]
-> **No soak is authorized or launched during Sprint 33.**
-> This roadmap defines the governance, gating, evaluation criteria, and staged duration progression required before any long-running paper soak may be executed.
+> **No soak was authorized or launched during Sprint 34.**
+> This roadmap defines the governance, gating, evaluation criteria, and staged duration progression required before any long-running paper soak may be executed. Both Gate A (Persistence & Recovery) and Gate B (Continuous Runtime & Position Monitoring) are now fully implemented and verified. Stage 1 (6-Hour Controlled Paper Soak) is the next milestone, requiring explicit operator review and authorization.
 
 ---
 
@@ -22,8 +22,8 @@ This document formalizes the staged progression roadmap for controlled paper soa
 ```mermaid
 flowchart TD
     GateA["Gate A: Sprint 33 Persistence & Recovery (PASSED)"]
-    GateB["Gate B: Sprint 34 Continuous Runtime & Position Monitor (PENDING)"]
-    ReviewB{"Operator Review & Explicit Authorization"}
+    GateB["Gate B: Sprint 34 Continuous Runtime & Position Monitor (PASSED)"]
+    ReviewB{"Operator Review & Explicit Authorization (CURRENT GATING STEP)"}
     Stage1["Stage 1: 6-Hour Controlled Paper Soak"]
     Review1{"Stage 1 Pass/Fail Evaluation & Authorization"}
     Stage2["Stage 2: 12-Hour Controlled Paper Soak"]
@@ -39,23 +39,23 @@ flowchart TD
     Review2 -->|All Gates Pass| Stage3
 ```
 
-### Gate A: Sprint 33 — Persistence & Recovery (COMPLETED)
+### Gate A: Sprint 33 — Persistence & Recovery (COMPLETED & VERIFIED)
 - **Objective:** Durable SQLite ledger persistence with WAL mode, restart recovery, idempotency preservation, and atomic transaction rollback.
-- **Status:** **PASSED & VERIFIED**.
+- **Status:** **PASSED & VERIFIED** (Commit `12f81393f292bbd6b0b51387ac280952d8e4d993`).
 
-### Gate B: Sprint 34 — Continuous Runtime & Position Monitoring (NEXT SPRINT)
+### Gate B: Sprint 34 — Continuous Runtime & Position Monitoring (COMPLETED & VERIFIED)
 - **Objective:**
-  1. Implement continuous scanning / runtime loop with configurable interval in `core/app.py`.
-  2. Implement active position monitoring worker to periodically fetch market prices and trigger `update_market_price()` and `process_candle()` for all open positions.
-  3. Implement graceful shutdown handlers (`SIGINT` / `SIGTERM`) with ledger flushing.
-  4. Unit test coverage for runtime orchestrator (`tests/test_app.py`).
-- **Status:** **REQUIRED BEFORE STAGE 1 SOAK**.
+  1. Implement continuous scanning / runtime loop with configurable interval in `core/app.py` and `core/runtime.py`.
+  2. Implement active position monitoring worker to periodically fetch public market prices and trigger `update_market_price()` and `process_candle()` for all open positions.
+  3. Implement responsive graceful shutdown handlers (`SIGINT` / `SIGTERM` / deadline / max cycles) with sub-second wakeups and ledger flushing.
+  4. Comprehensive unit test coverage for runtime orchestrator in `tests/test_app.py` (352/352 tests passed).
+- **Status:** **PASSED & VERIFIED**.
 
 ---
 
 ## 3. Staged Soak Progression
 
-### Stage 1: Six-Hour Controlled Paper Soak
+### Stage 1: Six-Hour Controlled Paper Soak (NEXT STEP UPON AUTHORIZATION)
 - **Duration:** 6 hours uninterrupted (or safety stop condition triggered).
 - **Execution Mode:** `TRADING_MODE = "SIMULATION"`, persistent SQLite ledger enabled.
 - **Evaluation Dimensions:**
@@ -95,4 +95,4 @@ A soak run must immediately terminate if any of the following occur:
 
 ## 5. Summary Statement
 
-Sprint 33 completes the fundamental data architecture (Gate A) required for durable paper trading. The system is handed off to **Sprint 34** for runtime loop and position monitoring implementation, prior to any soak execution.
+Sprint 34 successfully completes the continuous runtime architecture, active position monitoring engine, thread-safe synchronization, and responsive graceful shutdown (Gate B). The ATHENA system is now structurally, logically, and persistenly complete for paper trading execution. It is handed off to the Operator and Product Owner for review and explicit authorization prior to initiating Stage 1 (6-hour controlled paper soak).

@@ -824,6 +824,11 @@ class PaperTradingWorkflow:
         """Return all closed paper trades."""
         return self.paper_engine.get_closed_trades()
 
+    @property
+    def storage(self) -> Any:
+        """Expose underlying PaperStorage instance if configured."""
+        return getattr(self.paper_engine, "storage", None)
+
     def close(self) -> None:
         """Safely close paper trading engine and persistent resources."""
         if hasattr(self.paper_engine, "close"):
