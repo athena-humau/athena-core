@@ -7,6 +7,7 @@ from scanner.eligibility_filter import MarketEligibilityFilter
 from scanner.ranking_engine import RankingEngine
 
 from market.pipeline import MarketAnalysisPipeline
+from execution.paper_workflow import PaperTradingWorkflow
 from config.settings import SHORTLIST_ANALYSIS_LIMIT
 
 from core.logger import log
@@ -22,6 +23,7 @@ class Athena:
         self.eligibility_filter = MarketEligibilityFilter()
         self.ranking_engine = RankingEngine()
         self.pipeline = MarketAnalysisPipeline()
+        self.paper_workflow = PaperTradingWorkflow()
 
     def run(self):
 
@@ -137,4 +139,43 @@ class Athena:
                 f"{s4h:<10}"
             )
 
+        print("=" * 70)
+
+        # Sprint 31: End-to-End Paper Trading Pipeline
+        log("Executing Simulated Paper Trading Workflow on Analyzed Shortlist...")
+        paper_results = self.paper_workflow.process_shortlist(analyses)
+
+        print()
+        print("=" * 70)
+        print("ATHENA END-TO-END PAPER TRADING PIPELINE SUMMARY")
+        print("=" * 70)
+        print(
+            f"{'SYMBOL':<14}"
+            f"{'STATUS':<20}"
+            f"{'STRATEGY':<24}"
+            f"{'DIR':<8}"
+            f"{'REASON / DETAILS'}"
+        )
+        print("-" * 70)
+
+        for res in paper_results:
+            strat_id = res.selection.selected_strategy_id if res.selection else "n/a"
+            dir_str = res.signal.direction.value if res.signal else "n/a"
+            reason_str = res.explanation or "; ".join(res.reason_codes) or "OK"
+            print(
+                f"{res.symbol:<14}"
+                f"{res.status.value:<20}"
+                f"{strat_id:<24}"
+                f"{dir_str:<8}"
+                f"{reason_str}"
+            )
+
+        print("=" * 70)
+        snapshot = self.paper_workflow.get_portfolio_snapshot()
+        print(
+            f"Paper Portfolio: Equity={snapshot.total_equity:.2f} USDT | "
+            f"Cash={snapshot.cash:.2f} USDT | "
+            f"Reserved Margin={snapshot.reserved_margin:.2f} USDT | "
+            f"Open Positions={len(snapshot.open_positions)}"
+        )
         print("=" * 70)
